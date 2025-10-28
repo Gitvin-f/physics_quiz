@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'models/Symbol_to_String.dart';
+import 'models/domain_graph.dart';
 import 'models/modelData.dart';
 import 'models/quizModel.dart';
 
@@ -24,8 +25,32 @@ class _PhysicsQuizScreenState extends ConsumerState<PhysicsQuizScreen> {
 
   void _nextQuestion() {
     final engine = ref.read(engineProvider);
-    // Example: solve v (v1) from {u, a, t}
-    final nq = engine.generate(target: v1, givens: {v0, a, t});
+    final mode = ref.read(modeProvider);
+    final registry = ref.read(registryProvider);
+
+    late final Question nq;
+    if (mode == QuizMode.singleDomain) {
+      nq = engine.singleDomain(
+        domainId: kinematics.id,
+        target: v1,
+        givens: {v0, a, t},
+      );
+    } else {
+      nq = engine.transferTask(
+        fromDomainId: kinematics.id,
+        fromGivens: {v0, a, t},
+        bridgeVar: v1,
+        toDomainId: mechanicsEnergy.id,
+        toGivens: {mBody},
+        target: eKinetic,
+        bridge: registry.bridgeFor(
+          fromDomain: kinematics.id,
+          fromVar: v1,
+          toDomain: mechanicsEnergy.id,
+          toVar: v1,
+        ),
+      );
+    }
     setState(() {
       _q = nq;
       _selectedIndex = null;
@@ -35,15 +60,20 @@ class _PhysicsQuizScreenState extends ConsumerState<PhysicsQuizScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final dom = ref.watch(domainProvider);
+    final registry = ref.watch(registryProvider);
     final fmt = ref.watch(formatProvider);
+    final mode = ref.watch(modeProvider);
 
     if (_q == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     final q = _q!;
-    final unit = unitText(dom.vars[q.target]!.unit);
+    final targetDef = registry.varDef(q.targetDomain, q.target);
+    if (targetDef == null) {
+      throw StateError('Zielvariable ${q.target} hat keine Domäne');
+    }
+    final unit = unitText(targetDef.unit);
     final d = fmt.d(q.target);
 
     // Build formatted choices
@@ -58,6 +88,24 @@ class _PhysicsQuizScreenState extends ConsumerState<PhysicsQuizScreen> {
       appBar: AppBar(
         title: const Text('Physik-Quiz'),
         actions: [
+          PopupMenuButton<QuizMode>(
+            tooltip: 'Aufgabentyp',
+            initialValue: mode,
+            onSelected: (value) {
+              ref.read(modeProvider.notifier).state = value;
+              _nextQuestion();
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: QuizMode.singleDomain,
+                child: Text('Eine Domäne'),
+              ),
+              PopupMenuItem(
+                value: QuizMode.transfer,
+                child: Text('Domänen-Transfer'),
+              ),
+            ],
+          ),
           PopupMenuButton<int>(
             tooltip: 'Dezimalstellen',
             onSelected: (v) {
@@ -143,6 +191,23 @@ class _PhysicsQuizScreenState extends ConsumerState<PhysicsQuizScreen> {
                 "Richtig: ${q.answer.toStringAsFixed(d)} $unit  (${symbol(q.target)})",
                 textAlign: TextAlign.center,
               ),
+              if (q.bridgeDescription != null && q.bridgeDescription!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4.0),
+                  child: Text(
+                    q.bridgeDescription!,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+              for (final derived in q.derived)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4.0),
+                  child: Text(
+                    _formatDatum(derived, fmt, registry),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
             ],
             const SizedBox(height: 12),
 
@@ -156,5 +221,19 @@ class _PhysicsQuizScreenState extends ConsumerState<PhysicsQuizScreen> {
         ),
       ),
     );
+  }
+
+  String _formatDatum(QuestionDatum datum, QuizFormat fmt, DomainRegistry registry) {
+    final def = registry.varDef(datum.domainId, datum.key);
+    final decimals = fmt.d(datum.key);
+    final value = datum.value.toStringAsFixed(decimals);
+    final unit = def != null ? unitText(def.unit) : '';
+    final domainTitle = registry.domain(datum.domainId).title;
+    final buffer = StringBuffer()
+      ..write('$domainTitle: ${symbol(datum.key)} = $value');
+    if (unit.isNotEmpty) {
+      buffer.write(' $unit');
+    }
+    return buffer.toString();
   }
 }

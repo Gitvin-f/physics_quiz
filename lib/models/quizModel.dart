@@ -1,10 +1,10 @@
 import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_riverpod/legacy.dart';
 
 import 'Formulars_and_Variabels.dart';
 import 'Symbol_to_String.dart';
+import 'domain_graph.dart';
 import 'modelData.dart';
 
 class QuizFormat {
@@ -21,73 +21,205 @@ final kinEasyFormat = QuizFormat(
   perVarDecimals: {a: 2, t: 1},
 );
 
+enum QuizMode { singleDomain, transfer }
+
+class QuestionDatum {
+  final VarKey key;
+  final String domainId;
+  final double value;
+
+  const QuestionDatum({
+    required this.key,
+    required this.domainId,
+    required this.value,
+  });
+}
+
 class Question {
   final String stem;
-  final Map<VarKey, double> givens;
+  final List<QuestionDatum> givens;
   final VarKey target;
+  final String targetDomain;
   final double answer;
   final List<String> used;
   final List<double> choices;
   final QuizFormat format;
+  final Set<String> domainsInvolved;
+  final List<QuestionDatum> derived;
+  final String? bridgeDescription;
 
-  const Question({
+  Question({
     required this.stem,
     required this.givens,
     required this.target,
+    required this.targetDomain,
     required this.answer,
     required this.used,
     required this.choices,
     required this.format,
+    required this.domainsInvolved,
+    this.derived = const [],
+    this.bridgeDescription,
   });
+
+  Iterable<QuestionDatum> byDomain(String domainId) sync* {
+    for (final g in givens) {
+      if (g.domainId == domainId) {
+        yield g;
+      }
+    }
+  }
 }
 
 class QuestionEngine {
-  final Domain dom;
+  final DomainRegistry registry;
   final QuizFormat fmt;
   final _r = Random();
 
-  QuestionEngine(this.dom, this.fmt);
+  QuestionEngine(this.registry, this.fmt);
 
-  double _sample(VarKey k) {
-    final def = dom.vars[k];
+  double _sample(String domainId, VarKey k) {
+    final def = registry.varDef(domainId, k);
     if (def == null) {
-      throw StateError("Variable key $k not found in domain ${dom.id}");
+      throw StateError('Variable key $k not found in domain $domainId');
     }
     final min = def.min;
     final max = def.max;
-    return min + _r.nextDouble() * (max - min);
+    final raw = min + _r.nextDouble() * (max - min);
+    final scale = pow(10, def.decimals).toDouble();
+    return (raw * scale).round() / scale;
   }
 
-  Question generate({required VarKey target, required Set<VarKey> givens}) {
-    final f = dom.formulas.firstWhere(
-      (fo) =>
-          fo.solves.containsKey(target) &&
+  FormulaDef _findFormula(Domain dom, VarKey target, Set<VarKey> givens) {
+    return dom.formulas.firstWhere(
+      (fo) => fo.solves.containsKey(target) &&
           fo.vars.difference({target}).every(givens.contains),
     );
+  }
 
-    final m = <VarKey, double>{for (final g in givens) g: _sample(g)};
+  Question singleDomain({
+    required String domainId,
+    required VarKey target,
+    required Set<VarKey> givens,
+  }) {
+    final dom = registry.domain(domainId);
+    final formula = _findFormula(dom, target, givens);
+    final sampled = <VarKey, double>{for (final g in givens) g: _sample(domainId, g)};
 
-    // light guards:
-    if (m[t]?.abs() case final x? when x < 0.2) m[t] = 1.0;
+    if (sampled[t]?.abs() case final x? when x < 0.2) sampled[t] = 1.0;
 
-    final ans = f.solves[target]!(m);
+    final ans = formula.solves[target]!(sampled);
     final choices = _choices(ans);
 
+    final givenList = [
+      for (final g in givens)
+        QuestionDatum(key: g, domainId: domainId, value: sampled[g]!),
+    ];
+
+    final givenText = givens
+        .map((k) => _formatGiven(domainId: domainId, key: k, value: sampled[k]!))
+        .join(', ');
+
     final stem =
-        "Gegeben: ${givens.map((k) {
-          final d = fmt.d(k);
-          final u = dom.vars[k]!.unit;
-          return "${symbol(k)} = ${m[k]!.toStringAsFixed(d)} ${unitText(u)}";
-        }).join(', ')}. Gesucht: ${symbol(target)}";
+        'Domäne ${dom.title}: Gegeben ${givenText}. Gesucht: ${symbol(target)}';
 
     return Question(
       stem: stem,
-      givens: m,
+      givens: givenList,
       target: target,
+      targetDomain: domainId,
       answer: ans,
-      used: [f.id],
+      used: [formula.id],
       choices: choices,
       format: fmt,
+      domainsInvolved: {domainId},
+    );
+  }
+
+  Question transferTask({
+    required String fromDomainId,
+    required Set<VarKey> fromGivens,
+    required VarKey bridgeVar,
+    required String toDomainId,
+    required Set<VarKey> toGivens,
+    required VarKey target,
+    DomainBridge? bridge,
+  }) {
+    final domA = registry.domain(fromDomainId);
+    final domB = registry.domain(toDomainId);
+    final selectedBridge = bridge ??
+        registry.bridgeFor(
+          fromDomain: fromDomainId,
+          fromVar: bridgeVar,
+          toDomain: toDomainId,
+          toVar: bridgeVar,
+        ) ??
+        DomainBridge(
+          id: 'implicit-${fromDomainId}-${toDomainId}-${bridgeVar.hashCode}',
+          description: 'Direkte Übertragung',
+          fromDomain: fromDomainId,
+          fromVar: bridgeVar,
+          toDomain: toDomainId,
+          toVar: bridgeVar,
+        );
+
+    final formulaA = _findFormula(domA, bridgeVar, fromGivens);
+    final sampledA = <VarKey, double>{
+      for (final g in fromGivens) g: _sample(fromDomainId, g)
+    };
+    final intermediate = formulaA.solves[bridgeVar]!(sampledA);
+    final transferred = selectedBridge.forward(intermediate);
+
+    final requiredForB = {...toGivens, selectedBridge.toVar};
+    final formulaB = _findFormula(domB, target, requiredForB);
+    final sampledB = <VarKey, double>{
+      for (final g in toGivens) g: _sample(toDomainId, g)
+    };
+    sampledB[selectedBridge.toVar] = transferred;
+
+    final answer = formulaB.solves[target]!(sampledB);
+    final choices = _choices(answer);
+
+    final givens = [
+      for (final g in fromGivens)
+        QuestionDatum(key: g, domainId: fromDomainId, value: sampledA[g]!),
+      for (final g in toGivens)
+        QuestionDatum(key: g, domainId: toDomainId, value: sampledB[g]!),
+    ];
+
+    final bridgeSteps = [
+      QuestionDatum(key: selectedBridge.fromVar, domainId: fromDomainId, value: intermediate),
+      if (selectedBridge.toVar != selectedBridge.fromVar)
+        QuestionDatum(key: selectedBridge.toVar, domainId: toDomainId, value: transferred),
+    ];
+
+    final step1Text = fromGivens
+        .map((k) => _formatGiven(domainId: fromDomainId, key: k, value: sampledA[k]!))
+        .join(', ');
+    final step2Text = toGivens
+        .map((k) => _formatGiven(domainId: toDomainId, key: k, value: sampledB[k]!))
+        .join(', ');
+
+    final buffer = StringBuffer()
+      ..writeln('Schritt 1 – ${domA.title}: Berechne ${symbol(bridgeVar)} aus $step1Text.')
+      ..writeln(
+          'Schritt 2 – ${domB.title}: Übertrage ${symbol(bridgeVar)} und verwende $step2Text, um ${symbol(target)} zu bestimmen.');
+    if (selectedBridge.description.isNotEmpty) {
+      buffer.writeln('Transferhinweis: ${selectedBridge.description}');
+    }
+
+    return Question(
+      stem: buffer.toString().trim(),
+      givens: givens,
+      target: target,
+      targetDomain: toDomainId,
+      answer: answer,
+      used: [formulaA.id, formulaB.id, selectedBridge.id],
+      choices: choices,
+      format: fmt,
+      domainsInvolved: {fromDomainId, toDomainId},
+      derived: bridgeSteps,
+      bridgeDescription: selectedBridge.description,
     );
   }
 
@@ -99,12 +231,26 @@ class QuestionEngine {
     }
     return s.toList()..shuffle(_r);
   }
+
+  String _formatGiven({
+    required String domainId,
+    required VarKey key,
+    required double value,
+  }) {
+    final def = registry.varDef(domainId, key);
+    if (def == null) {
+      throw StateError('Variable $key nicht in Domäne $domainId gefunden');
+    }
+    final decimals = fmt.d(key);
+    return '${symbol(key)} = ${value.toStringAsFixed(decimals)} ${unitText(def.unit)}';
+  }
 }
 
-final domainProvider = Provider<Domain>((_) => kinematics);
+final registryProvider = Provider<DomainRegistry>((_) => domainRegistry);
 final formatProvider = StateProvider<QuizFormat>((_) => kinEasyFormat);
+final modeProvider = StateProvider<QuizMode>((_) => QuizMode.singleDomain);
 final engineProvider = Provider<QuestionEngine>((ref) {
-  final dom = ref.watch(domainProvider);
+  final registry = ref.watch(registryProvider);
   final fmt = ref.watch(formatProvider);
-  return QuestionEngine(dom, fmt);
+  return QuestionEngine(registry, fmt);
 });
