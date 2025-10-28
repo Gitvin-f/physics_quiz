@@ -1,6 +1,7 @@
 import 'dart:math';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 
 import 'Formulars_and_Variabels.dart';
 import 'Symbol_to_String.dart';
@@ -121,7 +122,7 @@ class QuestionEngine {
         .join(', ');
 
     final stem =
-        'Domäne ${dom.title}: Gegeben ${givenText}. Gesucht: ${symbol(target)}';
+        'Domäne ${dom.title}: Gegeben $givenText. Gesucht: ${symbol(target)}';
 
     return Question(
       stem: stem,
@@ -155,7 +156,7 @@ class QuestionEngine {
           toVar: bridgeVar,
         ) ??
         DomainBridge(
-          id: 'implicit-${fromDomainId}-${toDomainId}-${bridgeVar.hashCode}',
+          id: 'implicit-$fromDomainId-$toDomainId-${bridgeVar.hashCode}',
           description: 'Direkte Übertragung',
           fromDomain: fromDomainId,
           fromVar: bridgeVar,

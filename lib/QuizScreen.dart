@@ -133,9 +133,13 @@ class _PhysicsQuizScreenState extends ConsumerState<PhysicsQuizScreen> {
               elevation: 1,
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
-                child: Text(
-                  q.stem,
-                  style: theme.textTheme.titleMedium,
+                child: Column(
+                  children: [
+                    Text(
+                      q.stem,
+                      style: theme.textTheme.titleMedium,
+                    ),
+                  ],
                 ),
               ),
             ),
