@@ -6,6 +6,11 @@ String symbol(VarKey k) {
   if (k.q == Quantity.acceleration) return "a";
   if (k.q == Quantity.time) return "t";
   if (k.q == Quantity.displacement) return "s";
+  if (k.q == Quantity.mass) return "m";
+  if (k.q == Quantity.energy) {
+    if (k.role == Role.finalValue) return "E_k";
+    return "E";
+  }
   return "${k.q.name}:${k.role.name}";
 }
 
@@ -16,26 +21,19 @@ String unitText(Unit u) {
     case Unit.s:
       return "s";
     case Unit.N:
-      // TODO: Handle this case.
-      throw UnimplementedError();
+      return "N";
     case Unit.kg:
-      // TODO: Handle this case.
-      throw UnimplementedError();
+      return "kg";
     case Unit.V:
-      // TODO: Handle this case.
-      throw UnimplementedError();
+      return "V";
     case Unit.A:
-      // TODO: Handle this case.
-      throw UnimplementedError();
+      return "A";
     case Unit.Ohm:
-      // TODO: Handle this case.
-      throw UnimplementedError();
+      return "Ω";
     case Unit.J:
-      // TODO: Handle this case.
-      throw UnimplementedError();
+      return "J";
     case Unit.W:
-      // TODO: Handle this case.
-      throw UnimplementedError();
+      return "W";
     case Unit.mps:
       return "m/s";
     case Unit.mps2:

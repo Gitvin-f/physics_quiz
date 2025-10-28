@@ -1,6 +1,6 @@
 enum Unit { m, s, mps, mps2, N, kg, V, A, Ohm, J, W }
 enum Role { initial, finalValue, delta, atStart, atEnd }
-enum Quantity { displacement, velocity, acceleration, time }
+enum Quantity { displacement, velocity, acceleration, time, mass, energy }
 
 class VarDef {
   final VarKey key; final Unit unit;

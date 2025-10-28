@@ -1,10 +1,15 @@
+import 'dart:math';
+
 import 'Formulars_and_Variabels.dart';
+import 'domain_graph.dart';
 
 const v0 = VarKey(Quantity.velocity, Role.initial);
 const v1 = VarKey(Quantity.velocity, Role.finalValue);
 const a  = VarKey(Quantity.acceleration, Role.atStart);
 const t  = VarKey(Quantity.time, Role.delta);
 const s  = VarKey(Quantity.displacement, Role.delta);
+const mBody = VarKey(Quantity.mass, Role.initial);
+const eKinetic = VarKey(Quantity.energy, Role.finalValue);
 
 final kinematics = Domain(
   id: 'kin',
@@ -34,5 +39,43 @@ final kinematics = Domain(
       },
     ),
     // v1^2 = v0^2 + 2 a s
+  ],
+);
+
+final mechanicsEnergy = Domain(
+  id: 'energy',
+  title: 'Mechanische Energie',
+  vars: {
+    mBody: VarDef(mBody, Unit.kg, min: 0.5, max: 1500, decimals: 1),
+    v1: VarDef(v1, Unit.mps, min: 0, max: 80, decimals: 2),
+    eKinetic: VarDef(eKinetic, Unit.J, min: 0, max: 200000, decimals: 0),
+  },
+  formulas: [
+    FormulaDef(
+      id: 'E_k = 0.5·m·v²',
+      vars: {eKinetic, mBody, v1},
+      solves: {
+        eKinetic: (m) => 0.5 * m[mBody]! * m[v1]! * m[v1]!,
+        v1: (m) => sqrt((2 * m[eKinetic]!) / m[mBody]!),
+      },
+    ),
+  ],
+);
+
+final domainRegistry = DomainRegistry(
+  domains: {
+    kinematics.id: kinematics,
+    mechanicsEnergy.id: mechanicsEnergy,
+  },
+  bridges: [
+    DomainBridge(
+      id: 'kin.v -> energy.v',
+      description:
+          'Nutze die Endgeschwindigkeit aus der Kinematik als Eingabe für die kinetische Energie.',
+      fromDomain: kinematics.id,
+      fromVar: v1,
+      toDomain: mechanicsEnergy.id,
+      toVar: v1,
+    ),
   ],
 );
