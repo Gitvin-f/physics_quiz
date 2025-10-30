@@ -1,5 +1,5 @@
-1. Add a domain selector
-2. Make the formatting of the given variabels in the display so each is displayed in a more clear way (Changes to the stem variabel of the question class may bee needed)
+1. (done) Add a domain selector
+2. (done) Make the formatting of the given variabels in the display so each is displayed in a more clear way (Changes to the stem variabel of the question class may bee needed)
 3. Make a difficulty selector
 4. Make it so that the answer given by the user only needs to be exact up to the most exact given decimal of one of the parameters
 5. Add a new question format in which the user has to type in the answer (changes to the Quizformat class)
