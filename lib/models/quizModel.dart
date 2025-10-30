@@ -117,12 +117,8 @@ class QuestionEngine {
         QuestionDatum(key: g, domainId: domainId, value: sampled[g]!),
     ];
 
-    final givenText = givens
-        .map((k) => _formatGiven(domainId: domainId, key: k, value: sampled[k]!))
-        .join(', ');
-
     final stem =
-        'Domäne ${dom.title}: Gegeben $givenText. Gesucht: ${symbol(target)}';
+        'Domäne ${dom.title}: Bestimme ${symbol(target)} mit den gegebenen Größen.';
 
     return Question(
       stem: stem,
@@ -194,12 +190,12 @@ class QuestionEngine {
         QuestionDatum(key: selectedBridge.toVar, domainId: toDomainId, value: transferred),
     ];
 
-    final step1Text = fromGivens
-        .map((k) => _formatGiven(domainId: fromDomainId, key: k, value: sampledA[k]!))
-        .join(', ');
-    final step2Text = toGivens
-        .map((k) => _formatGiven(domainId: toDomainId, key: k, value: sampledB[k]!))
-        .join(', ');
+    final step1Text = fromGivens.isEmpty
+        ? 'den gegebenen Größen'
+        : fromGivens.map(symbol).join(', ');
+    final step2Text = toGivens.isEmpty
+        ? 'den gegebenen Größen'
+        : toGivens.map(symbol).join(', ');
 
     final buffer = StringBuffer()
       ..writeln('Schritt 1 – ${domA.title}: Berechne ${symbol(bridgeVar)} aus $step1Text.')
@@ -233,23 +229,12 @@ class QuestionEngine {
     return s.toList()..shuffle(_r);
   }
 
-  String _formatGiven({
-    required String domainId,
-    required VarKey key,
-    required double value,
-  }) {
-    final def = registry.varDef(domainId, key);
-    if (def == null) {
-      throw StateError('Variable $key nicht in Domäne $domainId gefunden');
-    }
-    final decimals = fmt.d(key);
-    return '${symbol(key)} = ${value.toStringAsFixed(decimals)} ${unitText(def.unit)}';
-  }
 }
 
 final registryProvider = Provider<DomainRegistry>((_) => domainRegistry);
 final formatProvider = StateProvider<QuizFormat>((_) => kinEasyFormat);
 final modeProvider = StateProvider<QuizMode>((_) => QuizMode.singleDomain);
+final selectedDomainProvider = StateProvider<String>((_) => kinematics.id);
 final engineProvider = Provider<QuestionEngine>((ref) {
   final registry = ref.watch(registryProvider);
   final fmt = ref.watch(formatProvider);

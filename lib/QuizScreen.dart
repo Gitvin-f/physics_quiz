@@ -1,10 +1,29 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'models/Formulars_and_Variabels.dart';
 import 'models/Symbol_to_String.dart';
 import 'models/domain_graph.dart';
 import 'models/modelData.dart';
 import 'models/quizModel.dart';
+
+class _SingleDomainConfig {
+  final VarKey target;
+  final Set<VarKey> givens;
+
+  const _SingleDomainConfig({required this.target, required this.givens});
+}
+
+final Map<String, _SingleDomainConfig> _singleDomainConfigs = {
+  kinematics.id: const _SingleDomainConfig(
+    target: v1,
+    givens: {v0, a, t},
+  ),
+  mechanicsEnergy.id: const _SingleDomainConfig(
+    target: eKinetic,
+    givens: {mBody, v1},
+  ),
+};
 
 class PhysicsQuizScreen extends ConsumerStatefulWidget {
   const PhysicsQuizScreen({super.key});
@@ -27,13 +46,25 @@ class _PhysicsQuizScreenState extends ConsumerState<PhysicsQuizScreen> {
     final engine = ref.read(engineProvider);
     final mode = ref.read(modeProvider);
     final registry = ref.read(registryProvider);
+    var domainId = ref.read(selectedDomainProvider);
 
     late final Question nq;
     if (mode == QuizMode.singleDomain) {
+      final configs = _singleDomainConfigs;
+      var config = configs[domainId];
+      if (config == null && configs.isNotEmpty) {
+        final fallback = configs.entries.first;
+        domainId = fallback.key;
+        config = fallback.value;
+        ref.read(selectedDomainProvider.notifier).state = domainId;
+      }
+      if (config == null) {
+        throw StateError('Keine Domänenkonfiguration für Einzelaufgaben verfügbar');
+      }
       nq = engine.singleDomain(
-        domainId: kinematics.id,
-        target: v1,
-        givens: {v0, a, t},
+        domainId: domainId,
+        target: config.target,
+        givens: config.givens,
       );
     } else {
       nq = engine.transferTask(
@@ -63,6 +94,14 @@ class _PhysicsQuizScreenState extends ConsumerState<PhysicsQuizScreen> {
     final registry = ref.watch(registryProvider);
     final fmt = ref.watch(formatProvider);
     final mode = ref.watch(modeProvider);
+    final selectedDomainId = ref.watch(selectedDomainProvider);
+    final domainConfigs = _singleDomainConfigs;
+    final effectiveDomainId = domainConfigs.containsKey(selectedDomainId)
+        ? selectedDomainId
+        : (domainConfigs.keys.isNotEmpty ? domainConfigs.keys.first : selectedDomainId);
+    final selectedDomainTitle = domainConfigs.containsKey(effectiveDomainId)
+        ? registry.domain(effectiveDomainId).title
+        : null;
 
     if (_q == null) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
@@ -75,6 +114,12 @@ class _PhysicsQuizScreenState extends ConsumerState<PhysicsQuizScreen> {
     }
     final unit = unitText(targetDef.unit);
     final d = fmt.d(q.target);
+    final targetDomainTitle = registry.domain(q.targetDomain).title;
+    final givensByDomain = <String, List<QuestionDatum>>{};
+    for (final datum in q.givens) {
+      givensByDomain.putIfAbsent(datum.domainId, () => []).add(datum);
+    }
+    final groupedGivens = givensByDomain.entries.toList();
 
     // Build formatted choices
     final choices = q.choices
@@ -88,6 +133,41 @@ class _PhysicsQuizScreenState extends ConsumerState<PhysicsQuizScreen> {
       appBar: AppBar(
         title: const Text('Physik-Quiz'),
         actions: [
+          if (mode == QuizMode.singleDomain && domainConfigs.isNotEmpty)
+            PopupMenuButton<String>(
+              tooltip: 'Domäne wählen',
+              initialValue: effectiveDomainId,
+              onSelected: (value) {
+                if (value != selectedDomainId) {
+                  ref.read(selectedDomainProvider.notifier).state = value;
+                  _nextQuestion();
+                }
+              },
+              itemBuilder: (_) => [
+                for (final entry in domainConfigs.entries)
+                  PopupMenuItem(
+                    value: entry.key,
+                    child: Text(registry.domain(entry.key).title),
+                  ),
+              ],
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (selectedDomainTitle != null)
+                      Text(
+                        selectedDomainTitle,
+                        style: TextStyle(color: theme.colorScheme.onPrimary),
+                      ),
+                    Icon(
+                      Icons.arrow_drop_down,
+                      color: theme.colorScheme.onPrimary,
+                    ),
+                  ],
+                ),
+              ),
+            ),
           PopupMenuButton<QuizMode>(
             tooltip: 'Aufgabentyp',
             initialValue: mode,
@@ -134,11 +214,68 @@ class _PhysicsQuizScreenState extends ConsumerState<PhysicsQuizScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(16.0),
                 child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      q.stem,
-                      style: theme.textTheme.titleMedium,
+                      'Gesucht: ${symbol(q.target)}',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Zieldomäne: $targetDomainTitle',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    if (q.stem.trim().isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        q.stem,
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ],
+                    if (groupedGivens.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      Text(
+                        'Gegeben:',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      for (var i = 0; i < groupedGivens.length; i++) ...[
+                        Text(
+                          registry.domain(groupedGivens[i].key).title,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final datum in groupedGivens[i].value)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 8,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: theme.colorScheme.surfaceVariant,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  _formatGivenValue(datum, fmt, registry),
+                                  style: theme.textTheme.bodyMedium,
+                                ),
+                              ),
+                          ],
+                        ),
+                        if (i < groupedGivens.length - 1)
+                          const SizedBox(height: 12),
+                      ],
+                    ],
                   ],
                 ),
               ),
@@ -239,5 +376,17 @@ class _PhysicsQuizScreenState extends ConsumerState<PhysicsQuizScreen> {
       buffer.write(' $unit');
     }
     return buffer.toString();
+  }
+
+  String _formatGivenValue(
+      QuestionDatum datum, QuizFormat fmt, DomainRegistry registry) {
+    final def = registry.varDef(datum.domainId, datum.key);
+    final decimals = fmt.d(datum.key);
+    final value = datum.value.toStringAsFixed(decimals);
+    final unit = def != null ? unitText(def.unit) : '';
+    if (unit.isEmpty) {
+      return '${symbol(datum.key)} = $value';
+    }
+    return '${symbol(datum.key)} = $value $unit';
   }
 }
